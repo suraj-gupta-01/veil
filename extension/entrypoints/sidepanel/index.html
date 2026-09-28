@@ -63,8 +63,11 @@
     <label for="server">Server URL</label>
     <div class="row">
       <input id="server" type="url" spellcheck="false" />
-      <button id="save" class="ghost" type="button">Save</button>
     </div>
+    <label for="terms">Custom sensitive terms, one per line</label>
+    <textarea id="terms" rows="3" spellcheck="false" placeholder="EMP-20417&#10;Project Falcon"></textarea>
+    <label class="check"><input type="checkbox" id="paranoid" /> Paranoid mode: read back each outgoing image with OCR and block if anything sensitive is readable (slower)</label>
+    <button id="save" class="ghost" type="button">Save settings</button>
     <button id="wipe" class="ghost" type="button">Wipe vault now</button>
   </details>
 

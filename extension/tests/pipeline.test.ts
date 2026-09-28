@@ -3,6 +3,7 @@ import { Vault } from '@/lib/vault';
 import { sanitize, sanitizeText } from '@/lib/sanitize';
 import { firewall, destinationAllowed } from '@/lib/egress';
 import { decide } from '@/lib/policy';
+import { maskWidth } from '@/lib/redact';
 import { templatePath } from '@/lib/url';
 import type { RawElement, RawSnapshot } from '@/lib/messages';
 import type { StepRequest } from '@/lib/vrs';
@@ -170,5 +171,59 @@ describe('vault dictionary', () => {
     const s = sanitize(raw, v, SRC);
     expect(s.needsResnap).toBe(true);
     expect(s.screen.texts.at(-1)!.text).toBe('Hello ⟦NAME_1⟧');
+  });
+});
+
+describe('custom terms', () => {
+  it('redacts a user-defined term anywhere and blocks it at the firewall', () => {
+    const v = new Vault();
+    v.tokenFor('CUSTOM', 'Project Falcon', 'user');
+    expect(sanitizeText('Status of project  falcon today', v, SRC).text).toBe('Status of ⟦CUSTOM_1⟧ today');
+    const req = request(v);
+    req.history.push({ step: 0, summary: 'Working on PROJECT FALCON' });
+    expect(firewall(req, v, 'http://localhost:8000/v1/step', 'http://localhost:8000', true).ok).toBe(false);
+  });
+});
+
+describe('mask width buckets', () => {
+  it('snaps widths to per-class buckets so masks hide value length', () => {
+    const h = 20;
+    expect(maskWidth('⟦NAME_1⟧', 70, h)).toBe(80);
+    expect(maskWidth('⟦NAME_2⟧', 150, h)).toBe(150);
+    expect(maskWidth('⟦NAME_3⟧', 158, h)).toBe(200);
+    expect(maskWidth('⟦SECRET_1⟧', 40, h)).toBe(120);
+    expect(maskWidth('⟦SECRET_1⟧', 90, h)).toBe(120);
+    expect(maskWidth('⟦AADHAAR_1⟧', 130, h)).toBe(160);
+    expect(maskWidth('⟦ADDRESS_1⟧', 900, h)).toBe(1400);
+    expect(maskWidth('REDACTED', 50, h)).toBe(60);
+  });
+
+  it('never shrinks a mask and leaves region masks alone', () => {
+    for (const w of [5, 33, 81, 199, 641]) expect(maskWidth('⟦EMAIL_1⟧', w, 16)).toBeGreaterThanOrEqual(w);
+    expect(maskWidth('⟦FACE_1⟧', 123, 150)).toBe(123);
+    expect(maskWidth('IMAGE', 400, 300)).toBe(400);
+  });
+});
+
+describe('paranoid OCR audit', () => {
+  const dest = 'http://localhost:8000/v1/step';
+  const server = 'http://localhost:8000';
+  const audit = (v: Vault, lines: string[] | null) => firewall(request(v), v, dest, server, true, lines).checks.find((c) => c.name === 'OCR audit')!;
+
+  it('passes when only placeholders and ordinary text are readable', () => {
+    const v = new Vault();
+    expect(audit(v, ['Full name', 'NAME_1', 'AADHAAR_1', 'Continue']).ok).toBe(true);
+  });
+
+  it('blocks vault values or identifiers still readable in the image, and a failed read-back', () => {
+    const v = new Vault();
+    expect(audit(v, ['Name Ananya Rao']).ok).toBe(false);
+    expect(audit(v, ['PAN ABCPR1234K']).detail).toContain('PAN');
+    expect(audit(v, null).ok).toBe(false);
+  });
+
+  it('is skipped when off', () => {
+    const v = new Vault();
+    expect(firewall(request(v), v, dest, server, true).checks.some((c) => c.name === 'OCR audit')).toBe(false);
   });
 });

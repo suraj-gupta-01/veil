@@ -99,3 +99,11 @@ describe('label-value pairs in running text', () => {
     expect(pick('Status: Active. Plan: Plus')).toEqual([]);
   });
 });
+
+describe('card expiry', () => {
+  it('is card data by label or autocomplete', () => {
+    expect(classFromContext('Expiry')).toBe('CARD');
+    expect(classFromContext('Valid thru')).toBe('CARD');
+    expect(classFromAutocomplete('cc-exp')).toBe('CARD');
+  });
+});

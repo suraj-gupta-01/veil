@@ -6,6 +6,9 @@ const MODELS = {
   'yunet.onnx': 'https://huggingface.co/opencv/face_detection_yunet/resolve/main/face_detection_yunet_2023mar.onnx',
   'ocr-det.onnx': 'https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv4/ch_PP-OCRv4_det_infer.onnx',
   'ocr-rec.onnx': 'https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv4/ch_PP-OCRv4_rec_infer.onnx',
+  // DistilBERT fine-tuned on CoNLL-2003 (dslim/distilbert-NER, Apache-2.0), int8. Loaded lazily for free text.
+  'ner.onnx': 'https://huggingface.co/onnx-community/distilbert-NER-ONNX/resolve/main/onnx/model_int8.onnx',
+  'ner-vocab.txt': 'https://huggingface.co/onnx-community/distilbert-NER-ONNX/resolve/main/vocab.txt',
 };
 
 const dir = new URL('../public/models/', import.meta.url);

@@ -22,7 +22,8 @@ export interface RawElement {
 }
 
 export interface RawText { vid: number; text: string; bbox: BBox; spans: (Span & { rects: BBox[] })[] }
-export interface RawRaster { vid: number; kind: string; alt: string; bbox: BBox }
+/** For iframes, `src` and `inner` (the content box) let the background match the frame's own snapshot. Local only. */
+export interface RawRaster { vid: number; kind: string; alt: string; bbox: BBox; src?: string; inner?: BBox }
 
 export interface RawSnapshot {
   url: string;
@@ -35,7 +36,8 @@ export interface RawSnapshot {
   ms: number;
 }
 
-export interface Mask { bbox: BBox; label: string }
+/** `field`: the box is a form field, whose width says nothing about the value, so it is not width-bucketed. */
+export interface Mask { bbox: BBox; label: string; field?: boolean }
 export interface Mark { id: number; bbox: BBox }
 
 export interface CompositeRequest {

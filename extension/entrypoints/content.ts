@@ -233,7 +233,15 @@ function snapshot(terms: Term[] = []): RawSnapshot {
     const r = el.getBoundingClientRect();
     const min = tag === 'svg' ? 96 : 48;
     if (r.width < min || r.height < min || !isVisible(el, r)) continue;
-    rasters.push({ vid: nextId(), kind: tag, alt: el.getAttribute('alt') || el.getAttribute('aria-label') || el.getAttribute('title') || '', bbox: toBox(r) });
+    const raster: RawRaster = { vid: nextId(), kind: tag, alt: el.getAttribute('alt') || el.getAttribute('aria-label') || el.getAttribute('title') || '', bbox: toBox(r) };
+    if (el instanceof HTMLIFrameElement) {
+      const cs = getComputedStyle(el);
+      const x = r.left + el.clientLeft + (parseFloat(cs.paddingLeft) || 0);
+      const y = r.top + el.clientTop + (parseFloat(cs.paddingTop) || 0);
+      raster.src = el.src;
+      raster.inner = [Math.round(x), Math.round(y), Math.round(x + el.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0)), Math.round(y + el.clientHeight - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0))];
+    }
+    rasters.push(raster);
   }
 
   return {
@@ -344,6 +352,7 @@ function settle(quietMs = 300, maxMs = 3000): Promise<void> {
 
 export default defineContentScript({
   matches: ['<all_urls>'],
+  allFrames: true,
   runAt: 'document_idle',
   main() {
     const w = window as unknown as { __veil?: boolean };

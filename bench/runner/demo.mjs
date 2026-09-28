@@ -68,6 +68,35 @@ const thanks = await page.textContent('#thanks');
 console.log((await logs()).join('\n'));
 if (!/Thanks, Ananya Rao/.test(thanks ?? '')) await fail(`bank form did not complete (status: ${await panel.textContent('#status')})`);
 if ((await logs()).some((l) => /firewall blocked|guard rejected/i.test(l))) await fail('a payload was blocked');
+// 3. Names in unlabelled free text (Phase 3 NER) never reach the payload.
+await panel.evaluate(() => document.getElementById('wipe').click());
+await page.goto(`${DEMO}/inbox.html`);
+await page.bringToFront();
+await page.waitForTimeout(500);
+const before = (await logs()).length;
+await panel.evaluate(() => document.getElementById('scan').click());
+await panel.waitForFunction((n) => document.querySelectorAll('#log li').length > n && [...document.querySelectorAll('#log li')].some((l) => /Scanned/.test(l.textContent)), before, { timeout: 60000 });
+await saveFrame('inbox-sent.webp');
+const payload = await panel.textContent('#payload');
+const raw = ['Rahul', 'Verma', 'Priya', 'Nair', 'Kavya', 'Menon'].filter((n) => payload.includes(n));
+console.log('Inbox:', (await panel.textContent('#timings')).replace(/ms/g, 'ms '));
+if (raw.length) await fail(`names left in the inbox payload: ${raw.join(', ')}`);
+
+// 4. A cross-origin card iframe is read as fields, not masked whole, and its values are tokenized.
+await page.goto(`${DEMO}/checkout.html`);
+await page.bringToFront();
+await page.waitForTimeout(800);
+const n4 = (await logs()).length;
+await panel.evaluate(() => document.getElementById('scan').click());
+await panel.waitForFunction((n) => [...document.querySelectorAll('#log li')].slice(0, document.querySelectorAll('#log li').length - n).some((l) => /Scanned/.test(l.textContent)), n4, { timeout: 60000 });
+await saveFrame('checkout-sent.webp');
+const pay = JSON.parse(await panel.textContent('#payload'));
+const card = pay.screen.elements.find((e) => e.label === 'Card number');
+console.log('Checkout:', pay.screen.elements.map((e) => `${e.id}:${e.role}:${e.label}${e.value ? '=' + e.value : ''}`).join(' | '));
+if (!card || !/⟦CARD_\d+⟧/.test(card.value ?? '')) await fail('card field inside the iframe was not read and tokenized');
+if (pay.screen.elements.some((e) => e.role === 'image' && /Card payment/.test(e.label))) await fail('payment iframe was masked whole instead of read');
+if (/4111|08\/29/.test(JSON.stringify(pay))) await fail('raw card data in the checkout payload');
+
 console.log(`PASS. Sent frames saved in ${OUT}`);
 await ctx.close();
 rmSync(profile, { recursive: true, force: true });

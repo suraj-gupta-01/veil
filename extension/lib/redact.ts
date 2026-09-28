@@ -1,8 +1,24 @@
 import type { CompositeRequest, CompositeResult } from './messages';
 
 const PAD = 3;
-const BUCKET = 32;
 const MARK_BG = '#1B6F61';
+
+// PR-8: mask widths snap to per-class buckets, in multiples of the mask height so they scale with font size,
+// so a mask does not reveal how long the value is. Region masks (faces, codes, images) keep their shape.
+const FIXED_FORMAT = ['AADHAAR', 'PAN', 'PASSPORT', 'VOTER_ID', 'CARD', 'ACCOUNT', 'IFSC', 'PHONE', 'DOB'];
+const REGION = ['FACE', 'SIGNATURE', 'QR', 'IMAGE'];
+const BUCKETS: Record<string, number[]> = { SECRET: [6], ...Object.fromEntries(FIXED_FORMAT.map((c) => [c, [6, 8, 11]])) };
+// Geometric steps about 35% apart: coarse enough to hide length, fine enough not to cover much neighbouring text.
+const VARIABLE = [3, 4, 5.5, 7.5, 10, 14, 19, 26, 35];
+
+export function maskWidth(label: string, w: number, h: number): number {
+  const cls = /^⟦([A-Z_]+?)_\d+⟧$/.exec(label)?.[1] ?? label;
+  if (REGION.includes(cls) || h <= 0) return w;
+  const steps = BUCKETS[cls] ?? VARIABLE;
+  const r = w / h;
+  const max = steps[steps.length - 1];
+  return (steps.find((s) => s >= r) ?? Math.ceil(r / max) * max) * h;
+}
 
 type Ctx = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
 
@@ -44,7 +60,7 @@ export async function composite(req: CompositeRequest): Promise<CompositeResult>
       return {
         x: Math.floor((m.bbox[0] - PAD) * k),
         y: Math.floor((m.bbox[1] - PAD) * k),
-        w: Math.ceil(Math.ceil(w / BUCKET) * BUCKET * k),
+        w: Math.ceil((m.field ? w : maskWidth(m.label, w, h)) * k),
         h: Math.ceil(h * k),
         label: m.label.replace(/[⟦⟧]/g, ''),
       };

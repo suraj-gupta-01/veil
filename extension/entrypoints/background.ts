@@ -3,12 +3,15 @@ import { collapse, rasterKey, sanitize, sanitizeText } from '@/lib/sanitize';
 import { egressFetch, firewall } from '@/lib/egress';
 import { composite } from '@/lib/redact';
 import { decide } from '@/lib/policy';
+import { classFromContext } from '@/lib/pii/rules';
 import { emit, listen } from '@/lib/runtime';
-import { getSettings, setSettings } from '@/lib/settings';
+import { getSettings, setSettings, type Settings } from '@/lib/settings';
 import { VRS_VERSION, tokensIn, type Action, type SessionResponse, type StepRequest, type StepResponse } from '@/lib/vrs';
 import type { CompositeRequest, CompositeResult, ExecResult, PanelRequest, RawSnapshot, Timings } from '@/lib/messages';
 import type { Sanitized } from '@/lib/sanitize';
 import type { RasterVision, VisionRequest, VisionResult } from '@/lib/vision';
+import type { Name } from '@/lib/pii/ner';
+import { matchFrames, mergeFrames, type FrameInfo, type Route } from '@/lib/frames';
 
 interface Task {
   goal: string;
@@ -27,12 +30,18 @@ interface Perception {
   raw: RawSnapshot;
   rawImage: string;
   san: Sanitized;
+  /** Elements that live in a child frame: page-level id to the frame and its own id. */
+  routes: Map<number, Route>;
   vision?: VisionResult;
   comp: CompositeResult;
   timings: Timings;
 }
 
 const MAX_STEPS = 12;
+// NER needs sentence context: on lone labels ("Aadhaar", "3. Done") it guesses PER for capitalised words.
+const NAME_LIKE = /\p{Lu}\p{Ll}+/u;
+const WORD = /\p{L}{2,}/gu;
+const NER_CHARS = 8000;
 
 export default defineBackground(() => {
   let vault = new Vault();
@@ -75,14 +84,34 @@ export default defineBackground(() => {
     return tab;
   }
 
-  async function toContent<T>(tabId: number, msg: object): Promise<T> {
-    const send = () => browser.tabs.sendMessage(tabId, { target: 'content', ...msg }) as Promise<T>;
+  async function toContent<T>(tabId: number, msg: object, frameId = 0): Promise<T> {
+    const send = () => browser.tabs.sendMessage(tabId, { target: 'content', ...msg }, { frameId }) as Promise<T>;
     try {
       return await send();
     } catch {
-      await browser.scripting.executeScript({ target: { tabId }, files: ['/content-scripts/content.js'] });
+      await browser.scripting.executeScript({ target: { tabId, frameIds: [frameId] }, files: ['/content-scripts/content.js'] });
       return await send();
     }
+  }
+
+  /** Top frame plus every direct child frame that can be matched to its <iframe>; the rest stay rasters. */
+  async function snapshotTab(tabId: number): Promise<{ raw: RawSnapshot; routes: Map<number, Route> }> {
+    const terms = vault.dictionary();
+    const top = await toContent<RawSnapshot>(tabId, { kind: 'snapshot', terms });
+    if (!top.rasters.some((r) => r.kind === 'iframe')) return { raw: top, routes: new Map() };
+    const probe = await browser.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: () => ({ url: location.href, size: [innerWidth, innerHeight] as [number, number], child: window !== window.top && window.parent === window.top }),
+    }).catch(() => []);
+    const frames: FrameInfo[] = probe
+      .filter((p) => p.frameId && p.result?.child)
+      .map((p) => ({ frameId: p.frameId, url: p.result!.url, size: p.result!.size }));
+    const children = [];
+    for (const { frame, raster } of matchFrames(top, frames)) {
+      const snap = await toContent<RawSnapshot>(tabId, { kind: 'snapshot', terms }, frame.frameId).catch(() => null);
+      if (snap) children.push({ frameId: frame.frameId, url: frame.url, raster, snap });
+    }
+    return mergeFrames(top, children);
   }
 
   // The perception page runs models and pixel work. Chrome hosts it as an offscreen document; Firefox's
@@ -115,6 +144,32 @@ export default defineBackground(() => {
 
   const see = (req: VisionRequest) => viaOffscreen<VisionResult>({ kind: 'vision', req });
 
+  // L2: names in free text (DOM text, unclassified field values, text read from images) join the vault as NAME,
+  // so the dictionary pass masks them wherever they appear, with exact rects after the re-snapshot.
+  async function learnNames(raw: RawSnapshot, vision: VisionResult | undefined, source: string, timings: Timings) {
+    const texts = [
+      ...raw.texts.map((t) => t.text),
+      ...raw.elements.filter((e) => e.value && e.role !== 'password').map((e) => e.value),
+      ...(vision?.rasters.flatMap((r) => r.lines.map((l) => l.text)) ?? []),
+    ].filter((t) => NAME_LIKE.test(t) && (t.match(WORD) ?? []).length >= 4);
+    const batch: string[] = [];
+    let chars = 0;
+    for (const t of texts) {
+      if (chars >= NER_CHARS) break;
+      batch.push(t);
+      chars += t.length;
+    }
+    if (!batch.length) return;
+    try {
+      const found = await timed(timings, 'ner', () => viaOffscreen<Name[]>({ kind: 'ner', texts: batch }));
+      const fresh = found.filter((n) => n.value.trim().length >= 3 && !classFromContext(n.value) && !vault.dictionary().some((t) => t.term.toLowerCase() === n.value.trim().toLowerCase()));
+      for (const n of fresh) vault.tokenFor('NAME', n.value.trim(), source);
+      if (fresh.length) log('info', `NER found ${fresh.length} name(s) in free text.`);
+    } catch (e) {
+      log('warn', `NER unavailable; names in free text rely on labels and the vault: ${(e as Error).message ?? e}`);
+    }
+  }
+
   async function readImages(raw: RawSnapshot, image: string, timings: Timings): Promise<VisionResult | undefined> {
     if (!raw.rasters.length) return undefined;
     const req = { image, viewport: raw.viewport, rasters: raw.rasters.map((r) => ({ key: rasterKey(r), bbox: r.bbox })) };
@@ -139,25 +194,27 @@ export default defineBackground(() => {
 
   async function perceive(tabId: number, windowId: number): Promise<Perception> {
     await ready;
+    for (const term of (await getSettings()).terms) vault.tokenFor('CUSTOM', term, 'user');
     const timings: Timings = {};
-    let [raw, rawImage] = await Promise.all([
-      timed(timings, 'snapshot', () => toContent<RawSnapshot>(tabId, { kind: 'snapshot', terms: vault.dictionary() })),
+    let [{ raw, routes }, rawImage] = await Promise.all([
+      timed(timings, 'snapshot', () => snapshotTab(tabId)),
       // PNG, not JPEG: compression artefacts make OCR merge words and misread digits.
       timed(timings, 'capture', () => browser.tabs.captureVisibleTab(windowId, { format: 'png' })),
     ]);
     const source = new URL(raw.url).origin;
     const vision = await readImages(raw, rawImage, timings);
     const seen = new Map(vision?.rasters.map((v) => [v.key, v]));
+    await learnNames(raw, vision, source, timings);
     let san = await timed(timings, 'sanitize', () => sanitize(raw, vault, source, seen));
     if (san.needsResnap) {
-      raw = await timed(timings, 'resnap', () => toContent<RawSnapshot>(tabId, { kind: 'snapshot', terms: vault.dictionary() }));
+      ({ raw, routes } = await timed(timings, 'resnap', () => snapshotTab(tabId)));
       san = sanitize(raw, vault, source, seen);
     }
     const comp = await timed(timings, 'redact', () =>
       compositeAnywhere({ image: rawImage, viewport: raw.viewport, masks: san.masks, marks: san.marks, maxSide: 1280 }),
     );
     await persist();
-    return { raw, rawImage, san, vision, comp, timings };
+    return { raw, rawImage, san, routes, vision, comp, timings };
   }
 
   function buildRequest(p: Perception, t: Task): StepRequest {
@@ -237,7 +294,10 @@ export default defineBackground(() => {
       const p = await perceive(t.tabId, cur.windowId!);
       const req = buildRequest(p, t);
       const dest = new URL('/v1/step', serverUrl).href;
-      const fw = await timed(p.timings, 'firewall', () => firewall(req, vault, dest, serverUrl, p.comp.integrity));
+      const readBack = req.screen.image && (await getSettings()).paranoid
+        ? await timed(p.timings, 'audit', () => viaOffscreen<string[]>({ kind: 'audit', image: req.screen.image }).catch(() => null))
+        : undefined;
+      const fw = await timed(p.timings, 'firewall', () => firewall(req, vault, dest, serverUrl, p.comp.integrity, readBack));
       showLens(t.step, p, req, fw);
 
       if (!fw.ok) {
@@ -277,9 +337,13 @@ export default defineBackground(() => {
     const label = target != null ? p.san.labels.get(target) ?? '' : '';
     const describe = () => a.type === 'type' ? `Type ${tokensIn(a.text).join(' ') || '(text)'} into “${label}”` : a.type === 'click' ? `Click “${label}”` : a.type;
 
+    // Actions on elements inside a child frame go to that frame, with its own id; the policy checks its origin.
+    const route = target != null ? p.routes.get(target) : undefined;
+    const exec = <T>(action: Action) => toContent<T>(t.tabId, { kind: 'exec', action: route ? { ...action, target: route.vid } : action }, route?.frameId ?? 0);
+
     if (a.type === 'done') return true;
     if (a.type === 'ask_user') {
-      await toContent(t.tabId, { kind: 'exec', action: a });
+      await exec(a);
       const ok = await ask('Your turn', a.message, 'Done, continue', 'Stop');
       if (!ok) { stop('Stopped.'); return false; }
       return true;
@@ -290,7 +354,7 @@ export default defineBackground(() => {
       vault,
       fieldClass: target != null ? p.san.fieldClasses.get(target) : undefined,
       label,
-      origin: new URL(cur.url ?? 'about:blank').origin,
+      origin: route?.origin ?? new URL(cur.url ?? 'about:blank').origin,
       allowedOrigins: t.allowedOrigins,
     });
     if (v.verdict === 'deny') {
@@ -303,7 +367,7 @@ export default defineBackground(() => {
     }
 
     const action = a.type === 'type' ? { ...a, text: vault.rehydrate(a.text) } : a;
-    const r = await toContent<ExecResult>(t.tabId, { kind: 'exec', action });
+    const r = await exec<ExecResult>(action);
     log(r.ok ? 'ok' : 'warn', r.ok ? describe() : `${describe()} failed: ${r.error}`);
     await new Promise((res) => setTimeout(res, 120));
     return true;
@@ -352,7 +416,7 @@ export default defineBackground(() => {
     }
   });
 
-  listen('settings', (msg: { kind: 'get' } | { kind: 'set'; serverUrl: string }) =>
-    msg.kind === 'get' ? getSettings() : setSettings({ serverUrl: msg.serverUrl }).then(() => ({ ok: true })),
+  listen('settings', (msg: { kind: 'get' } | ({ kind: 'set' } & Settings)) =>
+    msg.kind === 'get' ? getSettings() : setSettings({ serverUrl: msg.serverUrl, terms: msg.terms, paranoid: msg.paranoid }).then(() => ({ ok: true })),
   );
 });

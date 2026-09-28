@@ -79,3 +79,4 @@ pre { font: 11px/1.5 var(--mono); background: var(--code); padding: 10px; border
 .settings { margin-top: 22px; padding-top: 12px; border-top: 1px solid var(--line); }
 .settings label { display: block; margin: 10px 0 4px; font-size: 13px; }
 .settings > button { margin-top: 10px; }
+.settings label.check { display: flex; gap: 6px; align-items: flex-start; color: var(--muted); }

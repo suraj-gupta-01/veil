@@ -104,16 +104,16 @@ export function sanitize(raw: RawSnapshot, vault: Vault, source: string, vision 
     if (el.role === 'password' || fc === 'SECRET') {
       if (el.hasValue) {
         value = vault.secretFor(`${source}|${collapse(el.label) || el.name || el.idAttr}`, source);
-        masks.push({ bbox: el.valueBox, label: value });
+        masks.push({ bbox: el.valueBox, label: value, field: true });
       }
     } else if (el.value) {
       if (fc) {
         value = vault.tokenFor(fc, el.value, source);
-        masks.push({ bbox: el.valueBox, label: value });
+        masks.push({ bbox: el.valueBox, label: value, field: true });
       } else {
         const s = clean(el.value);
         value = s.text;
-        if (s.hit) masks.push({ bbox: el.valueBox, label: 'REDACTED' });
+        if (s.hit) masks.push({ bbox: el.valueBox, label: 'REDACTED', field: true });
       }
     }
 

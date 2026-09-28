@@ -18,6 +18,8 @@ const payloadEl = $('payload');
 const logEl = $('log');
 const approval = $('approval');
 const server = $<HTMLInputElement>('server');
+const terms = $<HTMLTextAreaElement>('terms');
+const paranoid = $<HTMLInputElement>('paranoid');
 
 let view: 'sent' | 'raw' = 'sent';
 let images = { raw: '', sent: '' };
@@ -57,7 +59,7 @@ function addLog(level: string, text: string) {
 }
 
 const TIMING_LABELS: Record<string, string> = {
-  capture: 'Capture', snapshot: 'DOM', vision: 'Vision', sanitize: 'Detect', redact: 'Redact', firewall: 'Firewall', server: 'Server', execute: 'Execute',
+  capture: 'Capture', snapshot: 'DOM', vision: 'Vision', sanitize: 'Detect', audit: 'OCR audit', ner: 'NER', redact: 'Redact', firewall: 'Firewall', server: 'Server', execute: 'Execute',
 };
 
 function renderLens(e: Extract<PanelEvent, { kind: 'lens' }>) {
@@ -139,7 +141,14 @@ startBtn.addEventListener('click', () => {
 stopBtn.addEventListener('click', () => call({ target: 'bg', kind: 'stop' }));
 $('wipe').addEventListener('click', () => { call({ target: 'bg', kind: 'wipe' }); tokensEl.replaceChildren(); });
 
-call<{ serverUrl: string }>({ target: 'settings', kind: 'get' }).then((s) => (server.value = s.serverUrl));
-$('save').addEventListener('click', () =>
-  call({ target: 'settings', kind: 'set', serverUrl: server.value.trim() }).then(() => addLog('ok', `Server set to ${server.value.trim()}.`)),
-);
+call<{ serverUrl: string; terms: string[]; paranoid: boolean }>({ target: 'settings', kind: 'get' }).then((s) => {
+  server.value = s.serverUrl;
+  paranoid.checked = s.paranoid;
+  terms.value = s.terms.join('\n');
+});
+$('save').addEventListener('click', () => {
+  const list = [...new Set(terms.value.split('\n').map((t) => t.trim()).filter((t) => t.length >= 3))];
+  call({ target: 'settings', kind: 'set', serverUrl: server.value.trim(), terms: list, paranoid: paranoid.checked }).then(() =>
+    addLog('ok', `Settings saved: server ${server.value.trim()}, ${list.length} custom term(s), paranoid mode ${paranoid.checked ? 'on' : 'off'}. Terms shorter than 3 characters are ignored.`),
+  );
+});

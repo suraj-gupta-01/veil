@@ -26,3 +26,8 @@ button.secondary { background: transparent; color: var(--brand); border: 1px sol
 @media (max-width: 640px) { .grid, .idcard { grid-template-columns: 1fr; } }
 main.wide { max-width: 1000px; }
 .scan { display: block; max-width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--line); }
+.thread p { margin: 0 0 12px; }
+.thread b { display: block; font-size: 14px; color: var(--muted); }
+.notes { display: block; margin-top: 18px; font-weight: 600; }
+.notes textarea { width: 100%; font: inherit; font-weight: 400; padding: 9px 11px; border: 1px solid var(--line); border-radius: 6px; }
+iframe.pay { display: block; width: 100%; margin-top: 16px; border: 1px solid var(--line); border-radius: 8px; }

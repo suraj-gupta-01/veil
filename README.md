@@ -11,9 +11,11 @@ extension/     WXT project (Chrome and Firefox, Manifest V3)
   entrypoints/ background agent loop, content script, side panel, offscreen host
   lib/         vrs schema, pii rules and validators, vault, sanitizer, redaction, egress firewall, policy
   lib/vision/  on-device models: YuNet faces, PP-OCRv4 text, QR finder (ONNX Runtime Web)
+  lib/pii/ner.ts  DistilBERT NER for names in free text, with its WordPiece tokenizer
+  lib/frames.ts   iframe matching and merging
   tests/       vitest unit and contract tests
 server/        FastAPI: VRS schema, leak guard, planner, API
-demo-sites/    ID card, bank form, plans page (synthetic data)
+demo-sites/    ID card (HTML and scanned image), bank form, plans, inbox, checkout with a cross-origin card iframe
 bench/         synthetic page generator with exact ground truth; browser smoke test in runner/
 contracts/     payload fixture shared by both test suites
 ```
@@ -36,7 +38,7 @@ python -m http.server 5500
 # 3. Extension
 cd extension
 npm install
-npm run models           # once: downloads the vision models (about 16 MB) into public/models
+npm run models           # once: downloads the vision and NER models (about 82 MB) into public/models
 npm run dev              # launches Chrome with VEIL loaded
 npm run dev:firefox      # or Firefox
 ```
@@ -59,6 +61,14 @@ Same flow, but open `http://localhost:5500/id-card-scan.html` in step 1. The car
 
 Without the models, or if a model fails or runs out of time, every image is masked whole (fail closed) and the log says why.
 
+## Try the Phase 3 features
+
+- `http://localhost:5500/inbox.html`: Scan page. Names in the message text and the notes field are masked by NER, with no label needed.
+- `http://localhost:5500/checkout.html`: the card form is an iframe from another origin. VEIL reads it as fields and tokenizes the card number, expiry and CVV instead of masking the whole frame.
+- Settings in the side panel:
+  - **Custom sensitive terms**, one per line (employee IDs, project names). They are redacted as `⟦CUSTOM_n⟧` everywhere.
+  - **Paranoid mode** reads back each outgoing image with OCR and blocks the send if anything sensitive is still readable.
+
 ## Tests
 
 ```bash
@@ -68,7 +78,10 @@ cd server && pytest -q
 
 Run the extension tests first; they write `contracts/step_request.json`, which the server contract test replays. The vision tests run the real models on `demo-sites/id-card-scan.png` and are skipped until `npm run models` has run.
 
-With the server and demo sites running and the extension built (`npm run build`), a headless Chromium smoke test runs the whole Phase 2 demo:
+With the server and demo sites running and the extension built (`npm run build`), a headless Chromium smoke test runs these checks:
+- the scanned-card to bank-form task;
+- the inbox NER check;
+- the checkout iframe check.
 
 ```bash
 cd bench/runner

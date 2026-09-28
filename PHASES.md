@@ -92,3 +92,43 @@ The first two steps need a GPU and a labelled screenshot set. Steps 3 and 4 do n
 - WebGPU: with a GPU, run `npm run dev` in Chrome, scan `id-card-scan.html`, and check that the log says "Vision on webgpu". Record the stage timings in this file. If WebGPU fails, the WASM fallback already works.
 
 Phase 2 is done when steps 1 to 4 are in and the benchmark shows F1 ≥ 0.90 and state accuracy ≥ 0.93.
+
+## Phase 3 status
+
+Phase 3 does not depend on the open Phase 2 items, with two exceptions noted below.
+
+Done:
+- **NER (L2).** `lib/pii/ner.ts` runs DistilBERT fine-tuned on CoNLL-2003 (int8, 66 MB) in the perception page with our own WordPiece tokenizer, so there is no second ONNX runtime. It loads lazily and is released after 60 s idle.
+  - Input is DOM text, unclassified field values and OCR lines, in sentence-aligned segments of up to 128 pieces, batched.
+  - Only person names are used, and only from texts of 4 or more words. On lone labels ("Aadhaar", "3. Done") the model guesses PER, which the first browser run caught.
+  - Names join the vault, so the dictionary and re-snapshot mask them with exact rects everywhere.
+- **Custom terms (FR-15).** Settings takes a list of terms. They become CUSTOM vault entries, masked wherever they appear and blocked at the firewall.
+- **Per-class width buckets (PR-8).** Buckets are multiples of the mask height, so they scale with font size.
+  - Geometric steps about 35% apart for variable-length classes.
+  - Fixed steps for IDs and secrets.
+  - No bucketing for form fields (the field width says nothing about the value) or for faces, codes and images.
+- **Paranoid OCR audit.** When on in Settings, OCR reads back the outgoing redacted frame. The firewall blocks if any vault value or ID pattern is still readable, or if the read-back fails.
+- **Iframes.** The content script runs in every frame.
+  - Each direct child frame is matched to its `<iframe>` by content size and origin; only unique matches count. Its elements and text are then merged at page coordinates with fresh ids.
+  - Actions are routed back to the frame, and the policy checks that frame's own origin.
+  - Unmatched, ambiguous and nested frames stay rasters and go through vision or are masked whole.
+- **Span-precise OCR masks and QR detection** (done in Phase 2).
+- **Card expiry** (`cc-exp`, "Expiry", "Valid thru") is now card data. The first iframe run found it going out raw.
+- **Browser smoke test** (`bench/runner/demo.mjs`) now also checks:
+  - no names reach the payload on `inbox.html` (NER);
+  - the cross-origin card iframe on `checkout.html` is read as tokenized fields, not masked whole.
+
+Still open:
+- [ ] Signature detection. It needs a detector class: add `signature` to the Phase 2 YOLO labels. A hand-written heuristic would be unreliable.
+- [ ] Barcode (1D) detection. It could be a scanline heuristic like the QR finder, or the same detector class.
+- [ ] Exit check: PII recall ≥ 0.97, pixel precision ≥ 0.85 and zero leaks on VEIL-Bench are not measured. This needs `bench/runner/score.mjs`, shared with Phase 2 step 4:
+  - generator ground truth as pixel boxes (`getClientRects` on each `data-gt` span);
+  - per-class entity recall and precision from the vault;
+  - pixel precision and recall of the mask layer;
+  - a leak count from an independent OCR pass over each sent frame.
+- [ ] Typing into a field inside an iframe is routed correctly in code but not yet exercised in a browser run.
+
+Known limits:
+- NER is English CoNLL. It finds common Indian names in sentences, but it will miss some. Single words in short UI text are skipped by design.
+- Width buckets cover a little neighbouring text. That is the price of hiding value length.
+- The extension is now about 110 MB with all models, of which the NER model is 66 MB and loads only when needed. The design target is 100 MB for the default set.

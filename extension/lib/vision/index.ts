@@ -4,6 +4,7 @@ import { crop, type Img } from './image';
 import { detectFaces } from './face';
 import { keysFrom, readText, type OcrLine } from './ocr';
 import { findCodes } from './qr';
+import { findNames, vocabFrom, type Name } from '../pii/ner';
 
 // Runs in an extension page (Chrome offscreen document, Firefox background page), never in the web page.
 
@@ -15,33 +16,51 @@ export interface VisionResult { backend: string; rasters: RasterVision[]; ms: nu
 const MAX_RASTERS = 6;
 const BUDGET_MS = 5000;
 const IDLE_MS = 60_000;
+const BASE = () => new URL('/models/', location.href).href;
 
 export interface Models { face: ort.InferenceSession; det: ort.InferenceSession; rec: ort.InferenceSession; keys: string[]; backend: string }
-let models: Promise<Models> | null = null;
-let idle: ReturnType<typeof setTimeout> | undefined;
 
-async function load(base: string): Promise<Models> {
-  const bytes = async (name: string) => new Uint8Array(await (await fetch(base + name)).arrayBuffer());
-  const [face, det, rec] = await Promise.all(['yunet.onnx', 'ocr-det.onnx', 'ocr-rec.onnx'].map(bytes));
-  const gpu = typeof navigator !== 'undefined' && 'gpu' in navigator && !!(await (navigator as any).gpu.requestAdapter().catch(() => null));
-  const open = async (buf: Uint8Array) => {
-    if (gpu) try { return await ort.InferenceSession.create(buf, { executionProviders: ['webgpu'] }); } catch { /* fall back to WASM */ }
-    return ort.InferenceSession.create(buf, { executionProviders: ['wasm'] });
-  };
-  return { face: await open(face), det: await open(det), rec: await open(rec), keys: keysFrom(rec), backend: gpu ? 'webgpu' : 'wasm' };
+const bytes = async (name: string) => new Uint8Array(await (await fetch(BASE() + name)).arrayBuffer());
+let gpu: Promise<boolean> | undefined;
+async function open(buf: Uint8Array): Promise<ort.InferenceSession> {
+  gpu ??= typeof navigator !== 'undefined' && 'gpu' in navigator
+    ? (navigator as any).gpu.requestAdapter().then((a: unknown) => !!a, () => false)
+    : Promise.resolve(false);
+  if (await gpu) try { return await ort.InferenceSession.create(buf, { executionProviders: ['webgpu'] }); } catch { /* fall back to WASM */ }
+  return ort.InferenceSession.create(buf, { executionProviders: ['wasm'] });
 }
 
-/** Sessions are created once and released after a minute without use, keeping idle memory low. */
-function getModels(base: string): Promise<Models> {
-  clearTimeout(idle);
-  models ??= load(base).catch((e) => { models = null; throw e; });
-  const current = models;
-  idle = setTimeout(() => {
-    if (models !== current) return;
-    models = null;
-    current.then((m) => [m.face, m.det, m.rec].forEach((s) => s.release()), () => {});
-  }, IDLE_MS);
-  return current;
+/** Loads on first use and releases the sessions after a minute without use, keeping idle memory low. */
+function lazy<T>(load: () => Promise<T>, sessions: (t: T) => ort.InferenceSession[]): () => Promise<T> {
+  let p: Promise<T> | null = null;
+  let idle: ReturnType<typeof setTimeout> | undefined;
+  return () => {
+    clearTimeout(idle);
+    p ??= load().catch((e) => { p = null; throw e; });
+    const cur = p;
+    idle = setTimeout(() => {
+      if (p !== cur) return;
+      p = null;
+      cur.then((t) => sessions(t).forEach((s) => s.release()), () => {});
+    }, IDLE_MS);
+    return cur;
+  };
+}
+
+const getModels = lazy<Models>(async () => {
+  const [face, det, rec] = await Promise.all(['yunet.onnx', 'ocr-det.onnx', 'ocr-rec.onnx'].map(bytes));
+  return { face: await open(face), det: await open(det), rec: await open(rec), keys: keysFrom(rec), backend: (await gpu) ? 'webgpu' : 'wasm' };
+}, (m) => [m.face, m.det, m.rec]);
+
+// NER is the largest model (66 MB), so it loads only once a page has free text worth checking.
+const getNer = lazy(async () => {
+  const [model, vocab] = await Promise.all([bytes('ner.onnx'), bytes('ner-vocab.txt')]);
+  return { session: await open(model), vocab: vocabFrom(new TextDecoder().decode(vocab)) };
+}, (n) => [n.session]);
+
+export async function names(texts: string[]): Promise<Name[]> {
+  const n = await getNer();
+  return findNames(n.session, n.vocab, texts);
 }
 
 export async function analyzeImage(m: Models, img: Img): Promise<Omit<RasterVision, 'key' | 'ok'>> {
@@ -59,13 +78,12 @@ async function decode(dataUrl: string): Promise<Img> {
   return ctx.getImageData(0, 0, c.width, c.height);
 }
 
-/** `base` defaults to the extension's /models/ folder, since this runs on an extension page. */
-export async function analyze(req: VisionRequest, base = new URL('/models/', location.href).href): Promise<VisionResult> {
+export async function analyze(req: VisionRequest): Promise<VisionResult> {
   const t0 = performance.now();
   const fail = (key: string, error: string): RasterVision => ({ key, ok: false, faces: [], codes: [], lines: [], error });
   let m: Models;
   try {
-    m = await getModels(base);
+    m = await getModels();
   } catch (e) {
     return { backend: 'none', rasters: req.rasters.map((r) => fail(r.key, `models unavailable: ${e}`)), ms: Math.round(performance.now() - t0) };
   }
@@ -100,4 +118,10 @@ export async function analyze(req: VisionRequest, base = new URL('/models/', loc
     }
   }
   return { backend: m.backend, rasters, ms: Math.round(performance.now() - t0) };
+}
+
+/** Paranoid mode: read back all text in the outgoing (already redacted) frame for the egress firewall. */
+export async function audit(image: string): Promise<string[]> {
+  const m = await getModels();
+  return (await readText(m.det, m.rec, m.keys, await decode(image))).map((l) => l.text);
 }
