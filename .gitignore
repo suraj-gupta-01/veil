@@ -1,0 +1,10 @@
+node_modules/
+.output/
+.wxt/
+__pycache__/
+.pytest_cache/
+.venv/
+bench/pages/
+*.zip
+extension/public/models/
+bench/runner/out/

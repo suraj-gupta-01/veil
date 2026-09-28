@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Open a savings account</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>Demo Bank</header>
+<main>
+  <h1>Open a savings account</h1>
+  <p class="sub">Takes about 3 minutes. Synthetic test bank.</p>
+  <div class="steps" aria-label="Progress">
+    <span id="s1" aria-current="step">1. Your details</span><span>›</span>
+    <span id="s2">2. Address and login</span><span>›</span>
+    <span id="s3">3. Done</span>
+  </div>
+
+  <form id="step1" class="card" novalidate>
+    <div class="grid">
+      <div class="field wide"><label for="fullName">Full name</label><input id="fullName" name="fullName" autocomplete="name" required></div>
+      <div class="field"><label for="dob">Date of birth</label><input id="dob" name="dob" placeholder="DD-MM-YYYY" required></div>
+      <div class="field"><label for="mobile">Mobile number</label><input id="mobile" name="mobile" inputmode="tel" required></div>
+      <div class="field wide"><label for="email">Email</label><input id="email" name="email" type="email" required></div>
+      <div class="field"><label for="aadhaar">Aadhaar number</label><input id="aadhaar" name="aadhaar" placeholder="#### #### ####" required></div>
+      <div class="field"><label for="pan">PAN</label><input id="pan" name="pan" required></div>
+    </div>
+    <p class="error" id="err1" hidden>Please fill every field.</p>
+    <div class="actions"><button type="submit">Continue</button></div>
+  </form>
+
+  <form id="step2" class="card" novalidate hidden>
+    <div class="grid">
+      <div class="field wide"><label for="address">Residential address</label><textarea id="address" name="address" rows="2" required></textarea></div>
+      <div class="field"><label for="pw">Create password</label><input id="pw" name="pw" type="password" autocomplete="new-password" required></div>
+      <div class="field"><label for="pw2">Confirm password</label><input id="pw2" name="pw2" type="password" autocomplete="new-password" required></div>
+    </div>
+    <p class="error" id="err2" hidden>Please fill every field. Passwords must match.</p>
+    <div class="actions">
+      <button type="button" class="secondary" id="back">Back</button>
+      <button type="submit">Submit application</button>
+    </div>
+  </form>
+
+  <section id="step3" class="card done" hidden>
+    <h2>Application received</h2>
+    <p id="thanks"></p>
+  </section>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const filled = (form) => [...form.querySelectorAll('[required]')].every((i) => i.value.trim());
+  const show = (n) => {
+    ['step1', 'step2', 'step3'].forEach((id, i) => ($(id).hidden = i !== n - 1));
+    ['s1', 's2', 's3'].forEach((id, i) => (i === n - 1 ? $(id).setAttribute('aria-current', 'step') : $(id).removeAttribute('aria-current')));
+  };
+  $('step1').addEventListener('submit', (e) => {
+    e.preventDefault();
+    $('err1').hidden = filled(e.target);
+    if (filled(e.target)) show(2);
+  });
+  $('back').addEventListener('click', () => show(1));
+  $('step2').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const ok = filled(e.target) && $('pw').value === $('pw2').value;
+    $('err2').hidden = ok;
+    if (!ok) return;
+    $('thanks').textContent = `Thanks, ${$('fullName').value}. We will text ${$('mobile').value} when your account is ready. Reference VEIL-2026-0042.`;
+    show(3);
+  });
+</script>
+</body>
+</html>

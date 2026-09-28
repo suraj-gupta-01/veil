@@ -1,0 +1,7 @@
+{
+  "name": "veil-bench-runner",
+  "private": true,
+  "type": "module",
+  "scripts": { "demo": "node demo.mjs" },
+  "devDependencies": { "playwright": "^1.63.0" }
+}

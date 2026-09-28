@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VEIL</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><span class="mark" aria-hidden="true"></span>VEIL</div>
+    <span id="status" class="status" role="status">Idle</span>
+  </header>
+
+  <section class="goal">
+    <label for="goal">What should VEIL do on this page?</label>
+    <textarea id="goal" rows="3" placeholder="Open a savings account using the details on my ID card"></textarea>
+    <div class="row">
+      <button id="scan" class="ghost" type="button">Scan page</button>
+      <button id="start" class="primary" type="button">Start</button>
+      <button id="stop" class="danger" type="button" disabled>Stop</button>
+    </div>
+    <div class="toggles">
+      <label><input type="checkbox" id="review" checked /> Review each send</label>
+      <label><input type="checkbox" id="structure" /> Structure only</label>
+    </div>
+  </section>
+
+  <section id="approval" class="approval" hidden aria-live="assertive">
+    <h2 id="ap-title"></h2>
+    <p id="ap-detail"></p>
+    <div class="row">
+      <button id="ap-yes" class="primary" type="button"></button>
+      <button id="ap-no" class="ghost" type="button"></button>
+    </div>
+  </section>
+
+  <section class="lens" aria-labelledby="lens-h">
+    <div class="lens-head">
+      <h2 id="lens-h">Privacy lens</h2>
+      <div class="seg" role="tablist" aria-label="Frame to show">
+        <button role="tab" data-view="sent" aria-selected="true" type="button">Sent</button>
+        <button role="tab" data-view="raw" aria-selected="false" type="button">On screen</button>
+      </div>
+    </div>
+    <div class="frame">
+      <img id="frame" alt="" hidden />
+      <p id="frame-empty">Scan a page to see exactly what would leave your browser.</p>
+    </div>
+    <ul id="firewall" class="checks"></ul>
+    <div id="tokens" class="tokens" aria-label="Placeholders in the vault"></div>
+    <div id="timings" class="timings"></div>
+    <details><summary>Outgoing JSON</summary><pre id="payload"></pre></details>
+  </section>
+
+  <section class="log">
+    <h2>Activity</h2>
+    <ol id="log"></ol>
+  </section>
+
+  <details class="settings">
+    <summary>Settings</summary>
+    <label for="server">Server URL</label>
+    <div class="row">
+      <input id="server" type="url" spellcheck="false" />
+      <button id="save" class="ghost" type="button">Save</button>
+    </div>
+    <button id="wipe" class="ghost" type="button">Wipe vault now</button>
+  </details>
+
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

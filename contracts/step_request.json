@@ -1,0 +1,84 @@
+{
+  "session_id": "FIXTURE",
+  "vrs_version": "1.0",
+  "goal": "Open a savings account using my ID card",
+  "step": 1,
+  "mode": "structure",
+  "screen": {
+    "origin": "http://localhost:5500",
+    "path_template": "/bank-form.html",
+    "title": "Open a savings account",
+    "state": {
+      "class": "generic",
+      "confidence": 0.4,
+      "src": "heuristic"
+    },
+    "viewport": [
+      1280,
+      720
+    ],
+    "elements": [
+      {
+        "id": 1,
+        "role": "textbox",
+        "label": "Full name",
+        "bbox": [
+          24,
+          102,
+          274,
+          128
+        ],
+        "src": "dom",
+        "value": "",
+        "field_class": "NAME",
+        "required": true
+      },
+      {
+        "id": 2,
+        "role": "textbox",
+        "label": "Aadhaar number",
+        "bbox": [
+          24,
+          202,
+          274,
+          228
+        ],
+        "src": "dom",
+        "value": "",
+        "placeholder": "#### #### ####",
+        "field_class": "AADHAAR",
+        "required": true
+      },
+      {
+        "id": 3,
+        "role": "button",
+        "label": "Continue",
+        "bbox": [
+          296,
+          252,
+          396,
+          278
+        ],
+        "src": "dom"
+      }
+    ],
+    "texts": []
+  },
+  "entities": [
+    {
+      "token": "⟦NAME_1⟧",
+      "class": "NAME",
+      "group": "PERSON",
+      "source": "http://localhost:5500"
+    },
+    {
+      "token": "⟦AADHAAR_1⟧",
+      "class": "AADHAAR",
+      "group": "GOV_ID",
+      "format": "#### #### ####",
+      "valid_checksum": true,
+      "source": "http://localhost:5500"
+    }
+  ],
+  "history": []
+}
